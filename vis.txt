@@ -1,0 +1,97 @@
+import sys
+import cv2
+import torch
+from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QLabel, QFileDialog, QVBoxLayout, QHBoxLayout
+from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtCore import QTimer
+
+# 加载YOLOv11模型
+model = torch.hub.load('ultralytics/yolov5', 'custom', path='yolov11s-visdrone.pt')  # YOLOv11兼容YOLOv5加载方式
+
+class YOLOApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('YOLOv11 - UAV目标检测系统')
+        self.setGeometry(100, 100, 900, 600)
+
+        # UI 元素
+        self.label = QLabel(self)
+        self.label.setText("图像显示区域")
+        self.label.setFixedSize(800, 500)
+
+        self.btn_image = QPushButton('选择图片检测')
+        self.btn_video = QPushButton('选择视频检测')
+        self.btn_camera = QPushButton('启动摄像头')
+
+        # 布局
+        layout = QVBoxLayout()
+        layout.addWidget(self.label)
+
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.btn_image)
+        hbox.addWidget(self.btn_video)
+        hbox.addWidget(self.btn_camera)
+        layout.addLayout(hbox)
+
+        self.setLayout(layout)
+
+        # 信号绑定
+        self.btn_image.clicked.connect(self.detect_image)
+        self.btn_video.clicked.connect(self.detect_video)
+        self.btn_camera.clicked.connect(self.detect_camera)
+
+        # 定时器（摄像头用）
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_frame)
+
+        self.cap = None
+
+    def detect_image(self):
+        path, _ = QFileDialog.getOpenFileName(self, '选择图片')
+        if path:
+            results = model(path)
+            img = results.render()[0]
+            self.display_image(img)
+
+    def detect_video(self):
+        path, _ = QFileDialog.getOpenFileName(self, '选择视频')
+        if path:
+            cap = cv2.VideoCapture(path)
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                results = model(frame)
+                img = results.render()[0]
+                self.display_image(img, wait=30)
+            cap.release()
+
+    def detect_camera(self):
+        self.cap = cv2.VideoCapture(0)
+        self.timer.start(30)
+
+    def update_frame(self):
+        ret, frame = self.cap.read()
+        if ret:
+            results = model(frame)
+            img = results.render()[0]
+            self.display_image(img)
+        else:
+            self.timer.stop()
+            self.cap.release()
+
+    def display_image(self, img, wait=1):
+        # BGR to RGB
+        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_img.shape
+        bytes_per_line = ch * w
+        qimg = QImage(rgb_img.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qimg).scaled(self.label.width(), self.label.height())
+        self.label.setPixmap(pixmap)
+        cv2.waitKey(wait)
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    window = YOLOApp()
+    window.show()
+    sys.exit(app.exec_())
